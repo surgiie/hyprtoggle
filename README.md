@@ -8,21 +8,14 @@ A bash cli script for toggling windows in [hyprland]
 
 ## Installation
 
-1. Clone this repository:
+Install the standalone script to your desired location:
+
 ```bash
-git clone https://github.com/yourusername/hyprtoggle.git
-cd hyprtoggle
+desired_path="/usr/local/bin/hyprtoggle" && \
+desired_version="main" && \
+curl -o "$desired_path" "https://raw.githubusercontent.com/surgiie/hyprtoggle/$desired_version/hyprtoggle" && chmod +x "$desired_path"
 ```
 
-2. Make the script executable:
-```bash
-chmod +x hyprtoggle
-```
-
-3. (Optional) Add to your PATH:
-```bash
-sudo ln -s "$(pwd)/hyprtoggle" /usr/local/bin/hyprtoggle
-```
 
 ## Usage
 
@@ -32,7 +25,7 @@ hyprtoggle --class <window_class> --exec <command> [OPTIONS]
 
 ### Required Arguments
 
-- `--class <class>` - Window class to toggle (e.g., `org.wezfurlong.wezterm`)
+- `--class <class>` - Window class to toggle (e.g., `org.wezfurlong.wezterm`). Can be found using `hyprctl clients
 - `--exec <command>` - Command to execute if window doesn't exist
 
 ### Optional Arguments
