@@ -14,17 +14,17 @@ display_logo() {
 version="0.1.0"
 
 display_help() {
-    echo "  Usage: $0 --class <window_class> --exec <command> [OPTIONS]"
-        echo ""
-        echo "  Required:"
-        echo "    --class <class>       Window class to toggle (e.g., org.wezfurlong.wezterm)"
-        echo "    --exec <command>      Command to execute if window doesn't exist"
-        echo ""
-        echo "  Optional:"
-        echo "    --on-hide <command>   Command to execute when hiding window"
-        echo "    --on-focus <command>  Command to execute when focusing window"
-        echo "    --workspace <name>    Workspace to hide window to (default: special:hidden)"
-        echo "    --help                Show this help message"
+	echo "  Usage: $0 --class <window_class> --exec <command> [OPTIONS]"
+	echo ""
+	echo "  Required:"
+	echo "    --class <class>       Window class to toggle (e.g., org.wezfurlong.wezterm)"
+	echo "    --exec <command>      Command to execute if window doesn't exist"
+	echo ""
+	echo "  Optional:"
+	echo "    --on-hide <command>   Command to execute when hiding window"
+	echo "    --on-focus <command>  Command to execute when focusing window"
+	echo "    --workspace <name>    Workspace to hide window to (default: special:hidden)"
+	echo "    --help                Show this help message"
 }
 
 if [ $# -eq 0 ]; then
@@ -42,99 +42,103 @@ workspace="special:hidden"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
-    case $1 in
-    --class)
-        window_class="$2"
-        shift 2
-        ;;
-    --exec)
-        exec_cmd="$2"
-        shift 2
-        ;;
-    --on-hide)
-        on_hide_cmd="$2"
-        shift 2
-        ;;
-    --on-focus)
-        on_focus_cmd="$2"
-        shift 2
-        ;;
-    --workspace)
-        workspace="$2"
-        shift 2
-        ;;
-    --help)
-        display_logo
-        display_help
-        exit 0
-        ;;
-    *)
-        echo "Unknown option: $1"
-        echo "Use --help for usage information"
-        exit 1
-        ;;
-    esac
+	case $1 in
+	--class)
+		window_class="$2"
+		shift 2
+		;;
+	--exec)
+		exec_cmd="$2"
+		shift 2
+		;;
+	--on-hide)
+		on_hide_cmd="$2"
+		shift 2
+		;;
+	--on-focus)
+		on_focus_cmd="$2"
+		shift 2
+		;;
+	--workspace)
+		workspace="$2"
+		shift 2
+		;;
+	--version)
+		echo "v$version"
+		exit 0
+		;;
+	--help)
+		display_logo
+		display_help
+		exit 0
+		;;
+	*)
+		echo "Unknown option: $1"
+		echo "Use --help for usage information"
+		exit 1
+		;;
+	esac
 done
 
 # Validate required arguments
 if [ -z "$window_class" ]; then
-    echo "Error: --class is required"
-    echo "Use --help for usage information"
-    exit 1
+	echo "Error: --class is required"
+	echo "Use --help for usage information"
+	exit 1
 fi
 
 if [ -z "$exec_cmd" ]; then
-    echo "Error: --exec is required"
-    echo "Use --help for usage information"
-    exit 1
+	echo "Error: --exec is required"
+	echo "Use --help for usage information"
+	exit 1
 fi
 
 # Exit fullscreen on the current window if it's fullscreen
 current_fullscreen=$(hyprctl activewindow -j | jq -r '.fullscreen')
 if [ "$current_fullscreen" != "0" ] && [ "$current_fullscreen" != "false" ]; then
-    hyprctl dispatch fullscreen
+	hyprctl dispatch fullscreen
 fi
 
 # Check if window with specified class exists
 if hyprctl clients | grep -q "class: $window_class"; then
-    # Get the window address
-    window_address=$(hyprctl clients -j | jq -r ".[] | select(.class == \"$window_class\") | .address")
-    # Check if window is currently focused
-    active_address=$(hyprctl activewindow -j | jq -r '.address')
+	# Get the window address
+	window_address=$(hyprctl clients -j | jq -r ".[] | select(.class == \"$window_class\") | .address")
+	# Check if window is currently focused
+	active_address=$(hyprctl activewindow -j | jq -r '.address')
 
-    if [ "$window_address" = "$active_address" ]; then
-        # Window is focused, hide it
-        hyprctl dispatch movetoworkspacesilent "$workspace",address:"$window_address"
+	if [ "$window_address" = "$active_address" ]; then
+		# Window is focused, hide it
+		hyprctl dispatch movetoworkspacesilent "$workspace",address:"$window_address"
 
-        # Execute on-hide command if provided
-        if [ -n "$on_hide_cmd" ]; then
-            bash -lc "$on_hide_cmd" || {
-                echo "Hook failed: $on_hide_cmd" >&2
-            }
-        fi
-    else
-        # Window exists but not focused, bring it to current workspace and focus
-        current_workspace=$(hyprctl activeworkspace -j | jq -r '.id')
-        window_workspace=$(hyprctl clients -j | jq -r ".[] | select(.address == \"$window_address\") | .workspace.id")
+		# Execute on-hide command if provided
+		if [ -n "$on_hide_cmd" ]; then
+			bash -lc "$on_hide_cmd" || {
+				echo "Hook failed: $on_hide_cmd" >&2
+			}
+		fi
+	else
+		# Window exists but not focused, bring it to current workspace and focus
+		current_workspace=$(hyprctl activeworkspace -j | jq -r '.id')
+		window_workspace=$(hyprctl clients -j | jq -r ".[] | select(.address == \"$window_address\") | .workspace.id")
 
-        hyprctl dispatch movetoworkspace "$current_workspace",address:"$window_address"
-        hyprctl dispatch focuswindow address:"$window_address"
+		hyprctl dispatch movetoworkspace "$current_workspace",address:"$window_address"
+		hyprctl dispatch focuswindow address:"$window_address"
 
-        # Execute on-focus command only if window was not already visible (on different workspace)
-        if [ "$window_workspace" != "$current_workspace" ] && [ -n "$on_focus_cmd" ]; then
-            bash -lc "$on_focus_cmd" || {
-                echo "Hook failed: $on_focus_cmd" >&2
-            }
-        fi
-    fi
+		# Execute on-focus command only if window was not already visible (on different workspace)
+		if [ "$window_workspace" != "$current_workspace" ] && [ -n "$on_focus_cmd" ]; then
+			bash -lc "$on_focus_cmd" || {
+				echo "Hook failed: $on_focus_cmd" >&2
+			}
+		fi
+	fi
 else
-    # Launch window on current workspace
-    hyprctl dispatch exec "$exec_cmd"
+	# Launch window on current workspace
+	hyprctl dispatch exec "$exec_cmd"
 
-    # Execute on-focus command if provided (treating launch as focus event)
-    if [ -n "$on_focus_cmd" ]; then
-        bash -lc "$on_focus_cmd" || {
-            echo "Hook failed: $on_focus_cmd" >&2
-        }
-    fi
+	# Execute on-focus command if provided (treating launch as focus event)
+	if [ -n "$on_focus_cmd" ]; then
+		bash -lc "$on_focus_cmd" || {
+			echo "Hook failed: $on_focus_cmd" >&2
+		}
+	fi
 fi
