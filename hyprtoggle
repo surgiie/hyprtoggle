@@ -101,8 +101,8 @@ fi
 
 # Check if window with specified class exists
 if hyprctl clients | grep -q "class: $window_class"; then
-	# Get the window address
-	window_address=$(hyprctl clients -j | jq -r ".[] | select(.class == \"$window_class\") | .address")
+	# Get the window address (select first match if multiple windows exist)
+	window_address=$(hyprctl clients -j | jq -r ".[] | select(.class == \"$window_class\") | .address" | head -1)
 	# Check if window is currently focused
 	active_address=$(hyprctl activewindow -j | jq -r '.address')
 
