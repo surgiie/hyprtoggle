@@ -1,12 +1,10 @@
 # hyprtoggle
 
-A simple CLI-based toggle script for Hyprland windows.
+A bash cli script for toggling windows in [hyprland]
 
 ## Introduction
 
-`hyprtoggle` helps overcome Hyprland's default behavior of opening new instances of applications. Instead of spawning duplicate windows, this script toggles a single instance: hiding it when focused, and showing/focusing it when not visible.
-
-Think of it as similar to [hyprshell](https://github.com/H3rmt/hyprshell), but purely command-line based without a GUI or daemon. Just a simple bash script you can bind directly to keybindings in your Hyprland configuration.
+`hyprtoggle` simplifies managing application focus: it toggles a single app instance by hiding it when it's already focused, and showing or focusing it when it's not.
 
 ## Installation
 
@@ -58,16 +56,11 @@ hyprtoggle --class "kitty" --exec "kitty"
 hyprtoggle --class "firefox" --exec "firefox" --workspace "special:browser"
 ```
 
-### Hyprland Configuration
-
-Add bindings to your `hyprland.conf`:
+### Hyprland Configuration Examples
 
 ```conf
-# Toggle dropdown terminal with sound effects
-bind = $mainMod, t, exec, hyprtoggle --class "org.wezfurlong.wezterm" --exec "wezterm" --on-hide "ffplay -nodisp -autoexit $HOME/.files/sounds/windwaker/pause-close.mp3" --on-focus "ffplay -nodisp -autoexit $HOME/.files/sounds/windwaker/pause.mp3"
-
-# Toggle browser with sound effects
-bind = $mainMod, b, exec, hyprtoggle --class "google-chrome" --exec "google-chrome-stable" --on-hide "ffplay -nodisp -autoexit $HOME/.files/sounds/kingdom-hearts/pause-close.mp3" --on-focus "ffplay -nodisp -autoexit $HOME/.files/sounds/kingdom-hearts/pause.mp3"
+# Toggle browser with hooks (play sounds on open/close)
+bind = $mainMod, b, exec, hyprtoggle --class "google-chrome" --exec "google-chrome-stable" --on-hide "ffplay -nodisp -autoexit $HOME/close.mp3" --on-focus "ffplay -nodisp -autoexit $HOME/open.mp3"
 
 # Simple toggle without hooks
 bind = $mainMod, grave, exec, hyprtoggle --class "kitty" --exec "kitty"
