@@ -1,17 +1,17 @@
- #!/usr/bin/env bash
+#!/usr/bin/env bash
 
 set -euo pipefail
 
 display_logo() {
-	YELLOW='\033[1;33m'
-	NC='\033[0m'
-	echo -e "${YELLOW}
-  █ █ █▄█ █▀█ █▀█ ▀█▀ █▀█ █▀▀ █▀▀ █   █▀▀
-  █▀█  █  █▀▀ █▀▄  █  █▄█ █▄█ █▄█ █▄▄ ██▄
-    ${NC}"
+	yellow='\033[1;33m'
+	nc='\033[0m'
+	echo -e "${yellow}
+  █ █ █▄█ █▀█ █▀█ ▀█▀ █▀█ █▀▀ █▀▀ █   █▀▀
+  █▀█  █  █▀▀ █▀▄  █  █▄█ █▄█ █▄█ █▄▄ ██▄
+    ${nc}"
 }
 
-VERSION="0.1.0"
+version="0.1.0"
 
 display_help() {
     echo "  Usage: $0 --class <window_class> --exec <command> [OPTIONS]"
@@ -33,3 +33,108 @@ if [ $# -eq 0 ]; then
 	exit 0
 fi
 
+# Default values
+window_class=""
+exec_cmd=""
+on_hide_cmd=""
+on_focus_cmd=""
+workspace="special:hidden"
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+    --class)
+        window_class="$2"
+        shift 2
+        ;;
+    --exec)
+        exec_cmd="$2"
+        shift 2
+        ;;
+    --on-hide)
+        on_hide_cmd="$2"
+        shift 2
+        ;;
+    --on-focus)
+        on_focus_cmd="$2"
+        shift 2
+        ;;
+    --workspace)
+        workspace="$2"
+        shift 2
+        ;;
+    --help)
+        display_logo
+        display_help
+        exit 0
+        ;;
+    *)
+        echo "Unknown option: $1"
+        echo "Use --help for usage information"
+        exit 1
+        ;;
+    esac
+done
+
+# Validate required arguments
+if [ -z "$window_class" ]; then
+    echo "Error: --class is required"
+    echo "Use --help for usage information"
+    exit 1
+fi
+
+if [ -z "$exec_cmd" ]; then
+    echo "Error: --exec is required"
+    echo "Use --help for usage information"
+    exit 1
+fi
+
+# Exit fullscreen on the current window if it's fullscreen
+current_fullscreen=$(hyprctl activewindow -j | jq -r '.fullscreen')
+if [ "$current_fullscreen" != "0" ] && [ "$current_fullscreen" != "false" ]; then
+    hyprctl dispatch fullscreen
+fi
+
+# Check if window with specified class exists
+if hyprctl clients | grep -q "class: $window_class"; then
+    # Get the window address
+    window_address=$(hyprctl clients -j | jq -r ".[] | select(.class == \"$window_class\") | .address")
+    # Check if window is currently focused
+    active_address=$(hyprctl activewindow -j | jq -r '.address')
+
+    if [ "$window_address" = "$active_address" ]; then
+        # Window is focused, hide it
+        hyprctl dispatch movetoworkspacesilent "$workspace",address:"$window_address"
+
+        # Execute on-hide command if provided
+        if [ -n "$on_hide_cmd" ]; then
+            bash -lc "$on_hide_cmd" || {
+                echo "Hook failed: $on_hide_cmd" >&2
+            }
+        fi
+    else
+        # Window exists but not focused, bring it to current workspace and focus
+        current_workspace=$(hyprctl activeworkspace -j | jq -r '.id')
+        window_workspace=$(hyprctl clients -j | jq -r ".[] | select(.address == \"$window_address\") | .workspace.id")
+
+        hyprctl dispatch movetoworkspace "$current_workspace",address:"$window_address"
+        hyprctl dispatch focuswindow address:"$window_address"
+
+        # Execute on-focus command only if window was not already visible (on different workspace)
+        if [ "$window_workspace" != "$current_workspace" ] && [ -n "$on_focus_cmd" ]; then
+            bash -lc "$on_focus_cmd" || {
+                echo "Hook failed: $on_focus_cmd" >&2
+            }
+        fi
+    fi
+else
+    # Launch window on current workspace
+    hyprctl dispatch exec "$exec_cmd"
+
+    # Execute on-focus command if provided (treating launch as focus event)
+    if [ -n "$on_focus_cmd" ]; then
+        bash -lc "$on_focus_cmd" || {
+            echo "Hook failed: $on_focus_cmd" >&2
+        }
+    fi
+fi
