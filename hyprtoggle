@@ -1,0 +1,35 @@
+ #!/usr/bin/env bash
+
+set -euo pipefail
+
+display_logo() {
+	YELLOW='\033[1;33m'
+	NC='\033[0m'
+	echo -e "${YELLOW}
+  █ █ █▄█ █▀█ █▀█ ▀█▀ █▀█ █▀▀ █▀▀ █   █▀▀
+  █▀█  █  █▀▀ █▀▄  █  █▄█ █▄█ █▄█ █▄▄ ██▄
+    ${NC}"
+}
+
+VERSION="0.1.0"
+
+display_help() {
+    echo "  Usage: $0 --class <window_class> --exec <command> [OPTIONS]"
+        echo ""
+        echo "  Required:"
+        echo "    --class <class>       Window class to toggle (e.g., org.wezfurlong.wezterm)"
+        echo "    --exec <command>      Command to execute if window doesn't exist"
+        echo ""
+        echo "  Optional:"
+        echo "    --on-hide <command>   Command to execute when hiding window"
+        echo "    --on-focus <command>  Command to execute when focusing window"
+        echo "    --workspace <name>    Workspace to hide window to (default: special:hidden)"
+        echo "    --help                Show this help message"
+}
+
+if [ $# -eq 0 ]; then
+	display_logo
+	display_help
+	exit 0
+fi
+
