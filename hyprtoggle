@@ -14,7 +14,7 @@ display_logo() {
 version="0.1.0"
 
 display_help() {
-	echo "  Usage: $0 --class <window_class> --exec <command> [OPTIONS]"
+	echo "  Usage: hyprtoggle --class <window_class> --exec <command> [OPTIONS]"
 	echo ""
 	echo "  Required:"
 	echo "    --class <class>       Window class to toggle (e.g., org.wezfurlong.wezterm)"

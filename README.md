@@ -11,7 +11,8 @@ A bash cli script for toggling windows in [hyprland]
 Install the standalone script to your desired location:
 
 ```bash
-desired_path="/usr/local/bin/hyprtoggle" && \
+# customize the path as needed, assumed to be in PATH:
+desired_path="$HOME/.local/bin/hyprtoggle" && \
 desired_version="main" && \
 curl -o "$desired_path" "https://raw.githubusercontent.com/surgiie/hyprtoggle/$desired_version/hyprtoggle" && chmod +x "$desired_path"
 ```
