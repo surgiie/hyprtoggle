@@ -2,7 +2,7 @@
 
 ## Introduction
 
-`hyprtoggle` is a bash cli that simplifies focusing and toggling applications in hyperland. 
+`hyprtoggle` is a bash cli that simplifies focusing and toggling applications in [hyperland](https://hypr.land/). 
 
 ## Installation
 
@@ -69,8 +69,8 @@ The script also handles fullscreen windows by automatically exiting fullscreen m
 ## Dependencies
 
 - [Hyprland](https://hyprland.org/)
-- `jq` - for JSON parsing
-- `bash` - version 4.0 or higher
+- [jq](https://jqlang.org/) - for JSON parsing
+- [bash](https://www.gnu.org/software/bash/) - version 4.0 or higher
 
 ## License
 
