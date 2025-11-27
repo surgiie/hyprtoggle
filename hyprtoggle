@@ -11,7 +11,7 @@ display_logo() {
     ${nc}"
 }
 
-version="0.1.0"
+version="0.1.1"
 
 display_help() {
 	echo "  Usage: hyprtoggle --class <window_class> --exec <command> [OPTIONS]"
