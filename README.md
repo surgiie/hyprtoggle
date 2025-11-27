@@ -1,6 +1,6 @@
 # hyprtoggle
 
-A bash cli script for toggling windows in [hyprland]
+A bash cli script for toggling windows in [hyprland](https://hypr.land/)
 
 ## Introduction
 
