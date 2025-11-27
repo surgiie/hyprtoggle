@@ -11,7 +11,7 @@ display_logo() {
     ${nc}"
 }
 
-version="0.1.0"
+version="0.1.1"
 
 display_help() {
 	echo "  Usage: hyprtoggle --class <window_class> --exec <command> [OPTIONS]"
@@ -96,7 +96,7 @@ fi
 # Exit fullscreen on the current window if it's fullscreen
 current_fullscreen=$(hyprctl activewindow -j | jq -r '.fullscreen')
 if [ "$current_fullscreen" != "0" ] && [ "$current_fullscreen" != "false" ]; then
-	hyprctl dispatch fullscreen
+	hyprctl dispatch fullscreen 1
 fi
 
 # Check if window with specified class exists
