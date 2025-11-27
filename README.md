@@ -1,10 +1,8 @@
 # hyprtoggle
 
-A bash cli script for toggling windows in [hyprland](https://hypr.land/)
-
 ## Introduction
 
-`hyprtoggle` simplifies managing application focus: it toggles a single app instance by hiding it when it's already focused, and showing or focusing it when it's not.
+`hyprtoggle` is a bash cli that simplifies focusing and toggling applications in hyperland. 
 
 ## Installation
 
