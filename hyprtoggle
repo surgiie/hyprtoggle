@@ -27,6 +27,28 @@ display_help() {
 	echo "    --help                Show this help message"
 }
 
+wait_for_window() {
+	local class="$1"
+	local max_attempts=30
+	local attempt=1
+	local delay=0.1
+
+	while [ $attempt -le $max_attempts ]; do
+		if hyprctl clients | grep -q "class: $class"; then
+			return 0
+		fi
+		sleep "$delay"
+		attempt=$((attempt + 1))
+		# Gradually increase delay up to 0.5s
+		if (( $(echo "$delay < 0.5" | bc -l) )); then
+			delay=$(echo "$delay + 0.05" | bc -l)
+		fi
+	done
+
+	echo "Warning: Window with class '$class' did not appear within timeout" >&2
+	return 1
+}
+
 if [ $# -eq 0 ]; then
 	display_logo
 	display_help
@@ -135,10 +157,13 @@ else
 	# Launch window on current workspace
 	hyprctl dispatch exec "$exec_cmd"
 
-	# Execute on-focus command if provided (treating launch as focus event)
-	if [ -n "$on_focus_cmd" ]; then
-		bash -lc "$on_focus_cmd" || {
-			echo "Hook failed: $on_focus_cmd" >&2
-		}
+	# Wait for window to be available before running hook
+	if wait_for_window "$window_class"; then
+		# Execute on-focus command if provided (treating launch as focus event)
+		if [ -n "$on_focus_cmd" ]; then
+			bash -lc "$on_focus_cmd" || {
+				echo "Hook failed: $on_focus_cmd" >&2
+			}
+		fi
 	fi
 fi
