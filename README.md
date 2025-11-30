@@ -24,7 +24,7 @@ hyprtoggle --class <window_class> --exec <command> [OPTIONS]
 
 ### Required Arguments
 
-- `--class <class>` - Window class to toggle (e.g., `org.wezfurlong.wezterm`). Can be found using `hyprctl clients
+- `--class <class>` - Window class to toggle (e.g., `org.wezfurlong.wezterm`). Can be found using `hyprctl clients`
 - `--exec <command>` - Command to execute if window doesn't exist
 
 ### Optional Arguments
