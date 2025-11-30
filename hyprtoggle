@@ -11,7 +11,7 @@ display_logo() {
     ${nc}"
 }
 
-version="0.1.2"
+version="0.2.0"
 
 display_help() {
 	echo "  Usage: hyprtoggle --class <window_class> --exec <command> [OPTIONS]"
@@ -24,6 +24,7 @@ display_help() {
 	echo "    --on-hide <command>   Command to execute when hiding window"
 	echo "    --on-focus <command>  Command to execute when focusing window"
 	echo "    --workspace <name>    Workspace to hide window to (default: special:hidden)"
+	echo "    --maximize            Maximize window when focusing."
 	echo "    --help                Show this help message"
 }
 
@@ -31,17 +32,17 @@ wait_for_window() {
 	local class="$1"
 	local max_attempts=30
 	local attempt=1
-	local delay=0.1
+	local delay_ms=100
 
 	while [ $attempt -le $max_attempts ]; do
 		if hyprctl clients | grep -q "class: $class"; then
 			return 0
 		fi
-		sleep "$delay"
+		sleep "$(awk "BEGIN {print $delay_ms/1000}")"
 		attempt=$((attempt + 1))
-		# Gradually increase delay up to 0.5s
-		if (($(echo "$delay < 0.5" | bc -l))); then
-			delay=$(echo "$delay + 0.05" | bc -l)
+		# Gradually increase delay up to 500ms
+		if [ $delay_ms -lt 500 ]; then
+			delay_ms=$((delay_ms + 50))
 		fi
 	done
 
@@ -61,6 +62,7 @@ exec_cmd=""
 on_hide_cmd=""
 on_focus_cmd=""
 workspace="special:hidden"
+maximize=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -84,6 +86,10 @@ while [[ $# -gt 0 ]]; do
 	--workspace)
 		workspace="$2"
 		shift 2
+		;;
+	--maximize)
+		maximize=true
+		shift
 		;;
 	--version)
 		echo "v$version"
@@ -145,6 +151,11 @@ if hyprctl clients | grep -q "class: $window_class"; then
 
 		hyprctl dispatch movetoworkspace "$current_workspace",address:"$window_address"
 		hyprctl dispatch focuswindow address:"$window_address"
+
+		# Maximize window if flag is set (whenever focusing a non-focused window)
+		if [ "$maximize" = true ]; then
+			hyprctl dispatch fullscreen 1
+		fi
 
 		# Execute on-focus command only if window was not already visible (on different workspace)
 		if [ "$window_workspace" != "$current_workspace" ] && [ -n "$on_focus_cmd" ]; then
