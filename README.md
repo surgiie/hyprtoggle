@@ -32,6 +32,7 @@ hyprtoggle --class <window_class> --exec <command> [OPTIONS]
 - `--on-hide <command>` - Command to execute when hiding window
 - `--on-focus <command>` - Command to execute when focusing window
 - `--workspace <name>` - Workspace to hide window to (default: `special:hidden`)
+- `--maximize` - Maximize window when focusing (equivalent to `fullscreen,1` in Hyprland config)
 - `--help` - Show help message
 
 ## Examples
@@ -48,6 +49,12 @@ hyprtoggle --class "kitty" --exec "kitty"
 hyprtoggle --class "firefox" --exec "firefox" --workspace "special:browser"
 ```
 
+### With maximize flag
+
+```bash
+hyprtoggle --class "kitty" --exec "kitty" --maximize
+```
+
 ### Hyprland Configuration Examples
 
 ```conf
@@ -61,15 +68,24 @@ bind = $mainMod, grave, exec, hyprtoggle --class "kitty" --exec "kitty"
 ## How It Works
 
 1. **Window exists and is focused**: Hides the window to the specified workspace
-2. **Window exists but not focused**: Brings the window to the current workspace and focuses it
+2. **Window exists but not focused**: Brings the window to the current workspace and focuses it (maximizes if `--maximize` flag is set)
 3. **Window doesn't exist**: Launches the application using the provided command
 
 The script also handles fullscreen windows by automatically exiting fullscreen mode before toggling.
+
+### Maximize Behavior
+
+When the `--maximize` flag is used:
+- Window is maximized (using `fullscreen 1`) whenever it's focused from a non-focused state
+- This includes when bringing from a hidden workspace or when covered by another window
+- Does NOT maximize on initial window launch
+- Does NOT affect hiding behavior (window is just hidden, not un-maximized)
 
 ## Dependencies
 
 - [Hyprland](https://hyprland.org/)
 - [jq](https://jqlang.org/) - for JSON parsing
+- [awk](https://www.gnu.org/software/gawk/) - for floating point calculations
 - [bash](https://www.gnu.org/software/bash/) - version 4.0 or higher
 
 ## License
