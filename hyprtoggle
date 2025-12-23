@@ -11,7 +11,7 @@ display_logo() {
     ${nc}"
 }
 
-version="0.2.1"
+version="0.2.2"
 
 display_help() {
 	echo "  Usage: hyprtoggle --class <window_class> --exec <command> [OPTIONS]"
@@ -115,12 +115,6 @@ if [ -z "$window_class" ]; then
 	exit 1
 fi
 
-if [ -z "$exec_cmd" ]; then
-	echo "Error: --exec is required"
-	echo "Use --help for usage information"
-	exit 1
-fi
-
 # Exit fullscreen on the current window if it's fullscreen
 current_fullscreen=$(hyprctl activewindow -j | jq -r '.fullscreen')
 if [ "$current_fullscreen" != "0" ] && [ "$current_fullscreen" != "false" ]; then
@@ -165,6 +159,13 @@ if hyprctl clients | grep -q "class: $window_class"; then
 		fi
 	fi
 else
+
+	if [ -z "$exec_cmd" ]; then
+		echo "Error: --exec is required when opening initial window."
+		echo "Use --help for usage information"
+		exit 1
+	fi
+
 	# Launch window on current workspace
 	hyprctl dispatch exec "$exec_cmd"
 
