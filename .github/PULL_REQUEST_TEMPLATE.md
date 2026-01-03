@@ -27,7 +27,6 @@
 <!-- Provide details about your test environment -->
 
 - OS:
-- Window Manager:
 - hyprtoggle version:
 
 ## Checklist
