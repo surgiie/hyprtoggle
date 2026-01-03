@@ -50,6 +50,50 @@ wait_for_window() {
     return 1
 }
 
+wait_for_new_window() {
+    local initial_count="$1"
+    local max_attempts=30
+    local attempt=1
+    local delay_ms=100
+
+    # Wait for window count to increase
+    while [ $attempt -le $max_attempts ]; do
+        local current_count
+        current_count=$(hyprctl clients -j | jq '. | length')
+
+        if [ "$current_count" -gt "$initial_count" ]; then
+            # New window appeared, wait for it to be ready (mapped with valid address)
+            local ready_attempts=0
+            local active_addr
+            local is_mapped
+
+            while [ $ready_attempts -lt 10 ]; do
+                active_addr=$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')
+                is_mapped=$(hyprctl activewindow -j 2>/dev/null | jq -r '.mapped // false')
+
+                if [ -n "$active_addr" ] && [ "$active_addr" != "0x" ] && [ "$is_mapped" = "true" ]; then
+                    return 0
+                fi
+
+                sleep 0.05
+                ready_attempts=$((ready_attempts + 1))
+            done
+
+            return 0
+        fi
+
+        sleep "$(awk "BEGIN {print $delay_ms/1000}")"
+        attempt=$((attempt + 1))
+
+        if [ $delay_ms -lt 500 ]; then
+            delay_ms=$((delay_ms + 50))
+        fi
+    done
+
+    echo "Warning: New window did not appear within timeout" >&2
+    return 1
+}
+
 execute_command() {
     local exec_cmd="$1"
     local window_class="$2"
@@ -80,42 +124,12 @@ execute_command() {
     else
         # No window class provided, but still handle maximize if requested
         if [ "$maximize" = true ]; then
-            # Get current window count before launching
             local initial_count
             initial_count=$(hyprctl clients -j | jq '. | length')
 
-            # Wait for a new window to appear
-            local max_attempts=30
-            local attempt=1
-            local delay_ms=100
-
-            while [ $attempt -le $max_attempts ]; do
-                local current_count
-                current_count=$(hyprctl clients -j | jq '. | length')
-                if [ "$current_count" -gt "$initial_count" ]; then
-                    # New window appeared, wait for it to have a valid address and be mapped
-                    local ready_attempts=0
-                    local active_addr
-                    local is_mapped
-                    while [ $ready_attempts -lt 10 ]; do
-                        active_addr=$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')
-                        is_mapped=$(hyprctl activewindow -j 2>/dev/null | jq -r '.mapped // false')
-                        if [ -n "$active_addr" ] && [ "$active_addr" != "0x" ] && [ "$is_mapped" = "true" ]; then
-                            break
-                        fi
-                        sleep 0.05
-                        ready_attempts=$((ready_attempts + 1))
-                    done
-                    break
-                fi
-                sleep "$(awk "BEGIN {print $delay_ms/1000}")"
-                attempt=$((attempt + 1))
-                if [ $delay_ms -lt 500 ]; then
-                    delay_ms=$((delay_ms + 50))
-                fi
-            done
-
-            hyprctl dispatch fullscreen 1
+            if wait_for_new_window "$initial_count"; then
+                hyprctl dispatch fullscreen 1
+            fi
         fi
     fi
 }
