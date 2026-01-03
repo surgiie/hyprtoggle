@@ -3,57 +3,141 @@
 set -euo pipefail
 
 display_logo() {
-	yellow='\033[1;33m'
-	nc='\033[0m'
-	echo -e "${yellow}
+    yellow='\033[1;33m'
+    nc='\033[0m'
+    echo -e "${yellow}
   █ █ █▄█ █▀█ █▀█ ▀█▀ █▀█ █▀▀ █▀▀ █   █▀▀
   █▀█  █  █▀▀ █▀▄  █  █▄█ █▄█ █▄█ █▄▄ ██▄
     ${nc}"
 }
 
-version="0.2.2"
+version="0.3.0"
 
 display_help() {
-	echo "  Usage: hyprtoggle --class <window_class> --exec <command> [OPTIONS]"
-	echo ""
-	echo "  Required:"
-	echo "    --class <class>       Window class to toggle (e.g., org.wezfurlong.wezterm)"
-	echo "    --exec <command>      Command to execute if window doesn't exist"
-	echo ""
-	echo "  Optional:"
-	echo "    --on-hide <command>   Command to execute when hiding window"
-	echo "    --on-focus <command>  Command to execute when focusing window"
-	echo "    --workspace <name>    Workspace to hide window to (default: special:hidden)"
-	echo "    --maximize            Maximize window when focusing."
-	echo "    --help                Show this help message"
+    echo "  Usage: hyprtoggle [--class <window_class>] [--exec <command>] [OPTIONS]"
+    echo ""
+    echo "  Required (at least one):"
+    echo "    --class <class>       Window class to toggle (e.g., org.wezfurlong.wezterm)"
+    echo "    --exec <command>      Command to execute (if --class not provided, simply opens window)"
+    echo ""
+    echo "  Optional:"
+    echo "    --on-hide <command>   Command to execute when hiding window"
+    echo "    --on-focus <command>  Command to execute when focusing window"
+    echo "    --workspace <name>    Workspace to hide window to (default: special:hidden)"
+    echo "    --maximize            Maximize window when focusing."
+    echo "    --help                Show this help message"
 }
 
 wait_for_window() {
-	local class="$1"
-	local max_attempts=30
-	local attempt=1
-	local delay_ms=100
+    local class="$1"
+    local max_attempts=30
+    local attempt=1
+    local delay_ms=100
 
-	while [ $attempt -le $max_attempts ]; do
-		if hyprctl clients | grep -q "class: $class"; then
-			return 0
-		fi
-		sleep "$(awk "BEGIN {print $delay_ms/1000}")"
-		attempt=$((attempt + 1))
-		# Gradually increase delay up to 500ms
-		if [ $delay_ms -lt 500 ]; then
-			delay_ms=$((delay_ms + 50))
-		fi
-	done
+    while [ $attempt -le $max_attempts ]; do
+        if hyprctl clients | grep -q "class: $class"; then
+            return 0
+        fi
+        sleep "$(awk "BEGIN {print $delay_ms/1000}")"
+        attempt=$((attempt + 1))
+        # Gradually increase delay up to 500ms
+        if [ $delay_ms -lt 500 ]; then
+            delay_ms=$((delay_ms + 50))
+        fi
+    done
 
-	echo "Warning: Window with class '$class' did not appear within timeout" >&2
-	return 1
+    echo "Warning: Window with class '$class' did not appear within timeout" >&2
+    return 1
+}
+
+wait_for_new_window() {
+    local initial_count="$1"
+    local max_attempts=30
+    local attempt=1
+    local delay_ms=100
+
+    # Wait for window count to increase
+    while [ $attempt -le $max_attempts ]; do
+        local current_count
+        current_count=$(hyprctl clients -j | jq '. | length')
+
+        if [ "$current_count" -gt "$initial_count" ]; then
+            # New window appeared, wait for it to be ready (mapped with valid address)
+            local ready_attempts=0
+            local active_addr
+            local is_mapped
+
+            while [ $ready_attempts -lt 10 ]; do
+                active_addr=$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')
+                is_mapped=$(hyprctl activewindow -j 2>/dev/null | jq -r '.mapped // false')
+
+                if [ -n "$active_addr" ] && [ "$active_addr" != "0x" ] && [ "$is_mapped" = "true" ]; then
+                    return 0
+                fi
+
+                sleep 0.05
+                ready_attempts=$((ready_attempts + 1))
+            done
+
+            return 0
+        fi
+
+        sleep "$(awk "BEGIN {print $delay_ms/1000}")"
+        attempt=$((attempt + 1))
+
+        if [ $delay_ms -lt 500 ]; then
+            delay_ms=$((delay_ms + 50))
+        fi
+    done
+
+    echo "Warning: New window did not appear within timeout" >&2
+    return 1
+}
+
+execute_command() {
+    local exec_cmd="$1"
+    local window_class="$2"
+    local maximize="$3"
+    local on_focus_cmd="$4"
+
+    # Launch window on current workspace
+    hyprctl dispatch exec "$exec_cmd"
+
+    # If window class is provided, wait for window and handle hooks
+    if [ -n "$window_class" ]; then
+        # Wait for window to be available before running hook
+        if wait_for_window "$window_class"; then
+            # Maximize window if flag is set (on initial launch)
+            if [ "$maximize" = true ]; then
+                window_address=$(hyprctl clients -j | jq -r ".[] | select(.class == \"$window_class\") | .address" | head -1)
+                hyprctl dispatch focuswindow address:"$window_address"
+                hyprctl dispatch fullscreen 1
+            fi
+
+            # Execute on-focus command if provided (treating launch as focus event)
+            if [ -n "$on_focus_cmd" ]; then
+                bash -lc "$on_focus_cmd" || {
+                    echo "Hook failed: $on_focus_cmd" >&2
+                }
+            fi
+        fi
+    else
+        # No window class provided, but still handle maximize if requested
+        if [ "$maximize" = true ]; then
+            local initial_count
+            initial_count=$(hyprctl clients -j | jq '. | length')
+
+            if wait_for_new_window "$initial_count"; then
+                hyprctl dispatch fullscreen 1
+            fi
+        fi
+    fi
 }
 
 if [ $# -eq 0 ]; then
-	display_logo
-	display_help
-	exit 0
+    display_logo
+    display_help
+    exit 0
 fi
 
 # Default values
@@ -66,123 +150,112 @@ maximize=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
-	case $1 in
-	--class)
-		window_class="$2"
-		shift 2
-		;;
-	--exec)
-		exec_cmd="$2"
-		shift 2
-		;;
-	--on-hide)
-		on_hide_cmd="$2"
-		shift 2
-		;;
-	--on-focus)
-		on_focus_cmd="$2"
-		shift 2
-		;;
-	--workspace)
-		workspace="$2"
-		shift 2
-		;;
-	--maximize)
-		maximize=true
-		shift
-		;;
-	--version)
-		echo "v$version"
-		exit 0
-		;;
-	--help)
-		display_logo
-		display_help
-		exit 0
-		;;
-	*)
-		echo "Unknown option: $1"
-		echo "Use --help for usage information"
-		exit 1
-		;;
-	esac
+    case $1 in
+    --class)
+        window_class="$2"
+        shift 2
+        ;;
+    --exec)
+        exec_cmd="$2"
+        shift 2
+        ;;
+    --on-hide)
+        on_hide_cmd="$2"
+        shift 2
+        ;;
+    --on-focus)
+        on_focus_cmd="$2"
+        shift 2
+        ;;
+    --workspace)
+        workspace="$2"
+        shift 2
+        ;;
+    --maximize)
+        maximize=true
+        shift
+        ;;
+    --version)
+        echo "v$version"
+        exit 0
+        ;;
+    --help)
+        display_logo
+        display_help
+        exit 0
+        ;;
+    *)
+        echo "Unknown option: $1"
+        echo "Use --help for usage information"
+        exit 1
+        ;;
+    esac
 done
 
 # Validate required arguments
-if [ -z "$window_class" ]; then
-	echo "Error: --class is required"
-	echo "Use --help for usage information"
-	exit 1
+if [ -z "$window_class" ] && [ -z "$exec_cmd" ]; then
+    echo "Error: Either --class or --exec is required"
+    echo "Use --help for usage information"
+    exit 1
+fi
+
+# If only --exec is provided (no --class), simply execute the command
+if [ -z "$window_class" ] && [ -n "$exec_cmd" ]; then
+    execute_command "$exec_cmd" "" "$maximize" "$on_focus_cmd"
+    exit 0
 fi
 
 # Exit fullscreen on the current window if it's fullscreen
 current_fullscreen=$(hyprctl activewindow -j | jq -r '.fullscreen')
 if [ "$current_fullscreen" != "0" ] && [ "$current_fullscreen" != "false" ]; then
-	hyprctl dispatch fullscreen 1
+    hyprctl dispatch fullscreen 1
 fi
 
 # Check if window with specified class exists
 if hyprctl clients | grep -q "class: $window_class"; then
-	# Get the window address (select first match if multiple windows exist)
-	window_address=$(hyprctl clients -j | jq -r ".[] | select(.class == \"$window_class\") | .address" | head -1)
-	# Check if window is currently focused
-	active_address=$(hyprctl activewindow -j | jq -r '.address')
+    # Get the window address (select first match if multiple windows exist)
+    window_address=$(hyprctl clients -j | jq -r ".[] | select(.class == \"$window_class\") | .address" | head -1)
+    # Check if window is currently focused
+    active_address=$(hyprctl activewindow -j | jq -r '.address')
 
-	if [ "$window_address" = "$active_address" ]; then
-		# Window is focused, hide it
-		hyprctl dispatch movetoworkspacesilent "$workspace",address:"$window_address"
+    if [ "$window_address" = "$active_address" ]; then
+        # Window is focused, hide it
+        hyprctl dispatch movetoworkspacesilent "$workspace",address:"$window_address"
 
-		# Execute on-hide command if provided
-		if [ -n "$on_hide_cmd" ]; then
-			bash -lc "$on_hide_cmd" || {
-				echo "Hook failed: $on_hide_cmd" >&2
-			}
-		fi
-	else
-		# Window exists but not focused, bring it to current workspace and focus
-		current_workspace=$(hyprctl activeworkspace -j | jq -r '.id')
-		window_workspace=$(hyprctl clients -j | jq -r ".[] | select(.address == \"$window_address\") | .workspace.id")
+        # Execute on-hide command if provided
+        if [ -n "$on_hide_cmd" ]; then
+            bash -lc "$on_hide_cmd" || {
+                echo "Hook failed: $on_hide_cmd" >&2
+            }
+        fi
+    else
+        # Window exists but not focused, bring it to current workspace and focus
+        current_workspace=$(hyprctl activeworkspace -j | jq -r '.id')
+        window_workspace=$(hyprctl clients -j | jq -r ".[] | select(.address == \"$window_address\") | .workspace.id")
 
-		hyprctl dispatch movetoworkspace "$current_workspace",address:"$window_address"
-		hyprctl dispatch focuswindow address:"$window_address"
+        hyprctl dispatch movetoworkspace "$current_workspace",address:"$window_address"
+        hyprctl dispatch focuswindow address:"$window_address"
 
-		# Maximize window if flag is set (whenever focusing a non-focused window)
-		if [ "$maximize" = true ]; then
-			hyprctl dispatch fullscreen 1
-		fi
+        # Maximize window if flag is set (whenever focusing a non-focused window)
+        if [ "$maximize" = true ]; then
+            hyprctl dispatch fullscreen 1
+        fi
 
-		# Execute on-focus command only if window was not already visible (on different workspace)
-		if [ "$window_workspace" != "$current_workspace" ] && [ -n "$on_focus_cmd" ]; then
-			bash -lc "$on_focus_cmd" || {
-				echo "Hook failed: $on_focus_cmd" >&2
-			}
-		fi
-	fi
+        # Execute on-focus command only if window was not already visible (on different workspace)
+        if [ "$window_workspace" != "$current_workspace" ] && [ -n "$on_focus_cmd" ]; then
+            bash -lc "$on_focus_cmd" || {
+                echo "Hook failed: $on_focus_cmd" >&2
+            }
+        fi
+    fi
 else
 
-	if [ -z "$exec_cmd" ]; then
-		echo "Error: --exec is required when opening initial window."
-		echo "Use --help for usage information"
-		exit 1
-	fi
+    if [ -z "$exec_cmd" ]; then
+        echo "Error: --exec is required when opening initial window."
+        echo "Use --help for usage information"
+        exit 1
+    fi
 
-	# Launch window on current workspace
-	hyprctl dispatch exec "$exec_cmd"
-
-	# Wait for window to be available before running hook
-	if wait_for_window "$window_class"; then
-		# Maximize window if flag is set (on initial launch)
-		if [ "$maximize" = true ]; then
-			window_address=$(hyprctl clients -j | jq -r ".[] | select(.class == \"$window_class\") | .address" | head -1)
-			hyprctl dispatch focuswindow address:"$window_address"
-			hyprctl dispatch fullscreen 1
-		fi
-
-		# Execute on-focus command if provided (treating launch as focus event)
-		if [ -n "$on_focus_cmd" ]; then
-			bash -lc "$on_focus_cmd" || {
-				echo "Hook failed: $on_focus_cmd" >&2
-			}
-		fi
-	fi
+    # Use the execute_command function to launch the window
+    execute_command "$exec_cmd" "$window_class" "$maximize" "$on_focus_cmd"
 fi
