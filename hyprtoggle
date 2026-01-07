@@ -25,6 +25,7 @@ display_help() {
     echo "    --on-focus <command>  Command to execute when focusing window"
     echo "    --workspace <name>    Workspace to hide window to (default: special:hidden)"
     echo "    --maximize            Maximize window when focusing."
+    echo "    --wait-for-exit       Wait for the window to exit before script completes"
     echo "    --help                Show this help message"
 }
 
@@ -147,6 +148,7 @@ on_hide_cmd=""
 on_focus_cmd=""
 workspace="special:hidden"
 maximize=false
+wait_for_exit=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -175,6 +177,10 @@ while [[ $# -gt 0 ]]; do
         maximize=true
         shift
         ;;
+    --wait-for-exit)
+        wait_for_exit=true
+        shift
+        ;;
     --version)
         echo "v$version"
         exit 0
@@ -201,7 +207,42 @@ fi
 
 # If only --exec is provided (no --class), simply execute the command
 if [ -z "$window_class" ] && [ -n "$exec_cmd" ]; then
-    execute_command "$exec_cmd" "" "$maximize" "$on_focus_cmd"
+    if [ "$wait_for_exit" = true ]; then
+        # Get initial window count
+        initial_count=$(hyprctl clients -j | jq '. | length')
+
+        # Launch the command
+        hyprctl dispatch exec "$exec_cmd"
+
+        # Wait for new window to appear
+        if wait_for_new_window "$initial_count"; then
+            # Get the address of the newly created window
+            window_address=$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')
+
+            if [ -n "$window_address" ] && [ "$window_address" != "0x" ]; then
+                # Handle maximize if needed
+                if [ "$maximize" = true ]; then
+                    hyprctl dispatch fullscreen 1
+                fi
+
+                # Execute on-focus command if provided
+                if [ -n "$on_focus_cmd" ]; then
+                    bash -lc "$on_focus_cmd" || {
+                        echo "Hook failed: $on_focus_cmd" >&2
+                    }
+                fi
+
+                # Wait for the window to close by checking if the address still exists
+                while hyprctl clients -j | jq -e ".[] | select(.address == \"$window_address\")" >/dev/null 2>&1; do
+                    sleep 0.5
+                done
+            else
+                echo "Warning: Could not capture window address" >&2
+            fi
+        fi
+    else
+        execute_command "$exec_cmd" "" "$maximize" "$on_focus_cmd"
+    fi
     exit 0
 fi
 
