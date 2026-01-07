@@ -95,11 +95,21 @@ wait_for_new_window() {
     return 1
 }
 
+wait_for_window_exit() {
+    local window_address="$1"
+
+    # Wait for the window to close by checking if the address still exists
+    while hyprctl clients -j | jq -e ".[] | select(.address == \"$window_address\")" >/dev/null 2>&1; do
+        sleep 0.5
+    done
+}
+
 execute_command() {
     local exec_cmd="$1"
     local window_class="$2"
     local maximize="$3"
     local on_focus_cmd="$4"
+    local wait_for_exit="$5"
 
     # Launch window on current workspace
     hyprctl dispatch exec "$exec_cmd"
@@ -108,9 +118,10 @@ execute_command() {
     if [ -n "$window_class" ]; then
         # Wait for window to be available before running hook
         if wait_for_window "$window_class"; then
+            window_address=$(hyprctl clients -j | jq -r ".[] | select(.class == \"$window_class\") | .address" | head -1)
+
             # Maximize window if flag is set (on initial launch)
             if [ "$maximize" = true ]; then
-                window_address=$(hyprctl clients -j | jq -r ".[] | select(.class == \"$window_class\") | .address" | head -1)
                 hyprctl dispatch focuswindow address:"$window_address"
                 hyprctl dispatch fullscreen 1
             fi
@@ -120,6 +131,11 @@ execute_command() {
                 bash -lc "$on_focus_cmd" || {
                     echo "Hook failed: $on_focus_cmd" >&2
                 }
+            fi
+
+            # Wait for window to exit if flag is set
+            if [ "$wait_for_exit" = true ]; then
+                wait_for_window_exit "$window_address"
             fi
         fi
     else
@@ -232,10 +248,8 @@ if [ -z "$window_class" ] && [ -n "$exec_cmd" ]; then
                     }
                 fi
 
-                # Wait for the window to close by checking if the address still exists
-                while hyprctl clients -j | jq -e ".[] | select(.address == \"$window_address\")" >/dev/null 2>&1; do
-                    sleep 0.5
-                done
+                # Wait for the window to exit
+                wait_for_window_exit "$window_address"
             else
                 echo "Warning: Could not capture window address" >&2
             fi
@@ -298,5 +312,5 @@ else
     fi
 
     # Use the execute_command function to launch the window
-    execute_command "$exec_cmd" "$window_class" "$maximize" "$on_focus_cmd"
+    execute_command "$exec_cmd" "$window_class" "$maximize" "$on_focus_cmd" "$wait_for_exit"
 fi
