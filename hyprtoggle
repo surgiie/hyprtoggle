@@ -11,7 +11,7 @@ display_logo() {
     ${nc}"
 }
 
-version="0.4.0"
+version="0.4.1"
 
 display_help() {
 	echo "  Usage: hyprtoggle [--class <window_class>] [--exec <command>] [OPTIONS]"
@@ -109,7 +109,7 @@ execute_command() {
 	local window_class="$2"
 	local maximize="$3"
 	local on_focus_cmd="$4"
-	local wait_for_exit="$5"
+	local wait_for_exit="${5:-false}"
 
 	# Launch window on current workspace
 	hyprctl dispatch exec "$exec_cmd"
