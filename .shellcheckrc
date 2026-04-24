@@ -1,0 +1,8 @@
+# ShellCheck configuration
+# Disable specific checks that don't apply
+
+# SC2086: Double quote to prevent globbing - intentional in some cases
+disable=SC2086
+
+# SC2181: Check exit code directly - some patterns prefer $?
+# disable=SC2181

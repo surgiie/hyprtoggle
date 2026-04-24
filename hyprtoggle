@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+
+version="0.1.0"
+
+set -euo pipefail
+
+# Print the hyprtoggle ASCII logo to stdout.
+# @noargs
+# @return void
+display_logo() {
+	local yellow='\033[1;33m' nc='\033[0m'
+	echo -e "${yellow}
+  █ █ █▄█ █▀█ █▀█ ▀█▀ █▀█ █▀▀ █▀▀ █   █▀▀
+  █▀█  █  █▀▀ █▀▄  █  █▄█ █▄█ █▄█ █▄▄ ██▄
+    ${nc}"
+}
+
+# Print usage information to stdout.
+# @noargs
+# @return void
+display_help() {
+	echo "  Usage: hyprt [--class <window_class>] [--exec <command>] [OPTIONS]"
+	echo ""
+	echo "  Required (at least one):"
+	echo "    --class <class>       Window class to toggle (e.g., org.wezfurlong.wezterm)"
+	echo "    --exec <command>      Command to execute (if --class not provided, simply opens window)"
+	echo ""
+	echo "  Optional:"
+	echo "    --on-hide <command>        Command to execute when hiding window"
+	echo "    --on-focus <command>       Command to execute when focusing window"
+	echo "    --on-launch <command>      Command to execute when launching a new window"
+	echo "    --cycle-on-multiple        When multiple instances exist, prompt user to pick one"
+	echo "    --picker <command>         Picker command for --cycle-on-multiple (default: fuzzel --dmenu)"
+	echo "    --workspace <name>         Workspace to hide window to (default: special:hidden)"
+	echo "    --wait-for-exit            Block until the window closes after opening"
+	echo "    --version             Show version and exit"
+	echo "    --help                Show this help message"
+}
+
+# Poll a condition function with incremental backoff until it succeeds or max attempts are reached.
+#   Delay starts at 100ms and increases by 50ms each attempt, capped at 500ms.
+# @arg $1 string Name of a function to call as the condition check.
+# @arg $2 string Warning message printed to stderr on timeout.
+# @return 0 Condition was met within the attempt limit.
+# @return 1 Condition was never met; timeout warning written to stderr.
+wait_with_backoff() {
+	local condition="$1" timeout_msg="$2"
+	local max_attempts=30 attempt=1 delay_ms=100
+
+	while [ $attempt -le $max_attempts ]; do
+		"$condition" && return 0
+		sleep "$(awk "BEGIN {print $delay_ms/1000}")"
+		attempt=$((attempt + 1))
+		[ $delay_ms -lt 500 ] && delay_ms=$((delay_ms + 50))
+	done
+
+	echo "Warning: $timeout_msg" >&2
+	return 1
+}
+
+# Wait for a window with the given class to appear in the Hyprland client list.
+# @arg $1 string Window class to wait for.
+# @return 0 Window appeared within the timeout.
+# @return 1 Window did not appear; timeout warning written to stderr.
+wait_for_window() {
+	local class="$1"
+	_check_window() { hyprctl clients -j | jq -e --arg c "$class" '[.[] | select(.class == $c)] | length > 0' >/dev/null; }
+	wait_with_backoff _check_window "Window with class '$class' did not appear within timeout"
+}
+
+# Wait for the total window count to exceed a baseline, then confirm the new window is mapped.
+# @arg $1 int Baseline window count to compare against.
+# @return 0 A new mapped window appeared within the timeout.
+# @return 1 No new window appeared; timeout warning written to stderr.
+wait_for_new_window() {
+	local initial_count="$1"
+	_check_new_window() { [ "$(hyprctl clients -j | jq '. | length')" -gt "$initial_count" ]; }
+	wait_with_backoff _check_new_window "New window did not appear within timeout" || return 1
+
+	local attempts=0 active_addr is_mapped
+	while [ $attempts -lt 10 ]; do
+		active_addr=$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')
+		is_mapped=$(hyprctl activewindow -j 2>/dev/null | jq -r '.mapped // false')
+		[ -n "$active_addr" ] && [ "$active_addr" != "0x" ] && [ "$is_mapped" = "true" ] && return 0
+		sleep 0.05
+		attempts=$((attempts + 1))
+	done
+
+	return 0
+}
+
+# Block until a window with the given address is no longer in the Hyprland client list.
+# @arg $1 string Hyprland window address (e.g. 0x55f3a1b2c3d4).
+# @return void
+wait_for_window_exit() {
+	local address="$1"
+	while hyprctl clients -j | jq -e --arg a "$address" '.[] | select(.address == $a)' >/dev/null 2>&1; do
+		sleep 0.5
+	done
+}
+
+# Poll until the given window address becomes the active window, up to 20 attempts.
+# @arg $1 string Hyprland window address (e.g. 0x55f3a1b2c3d4).
+# @return 0 Window became active within the attempt limit.
+# @return 0 Attempt limit reached without confirmation (silent, non-fatal).
+wait_for_focus() {
+	local address="$1"
+	local attempts=0 current
+	while [ $attempts -lt 20 ]; do
+		current=$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')
+		[ "$current" = "$address" ] && return 0
+		sleep 0.05
+		attempts=$((attempts + 1))
+	done
+}
+
+# Run a hook command in a login shell; warn on failure but do not abort.
+# @arg $1 string Shell command to execute. No-op if empty.
+# @return 0 Command succeeded or was empty.
+# @return 0 Command failed; warning written to stderr (non-fatal).
+run_hook() {
+	local cmd="$1"
+	[ -z "$cmd" ] && return 0
+	bash -lc "$cmd" || echo "Warning: hook failed: $cmd" >&2
+}
+
+# Focus a window by address and maximize it to fill the screen.
+# @arg $1 string Hyprland window address (e.g. 0x55f3a1b2c3d4).
+# @return void
+focus_and_maximize() {
+	local address="$1"
+	hyprctl dispatch focuswindow address:"$address"
+	wait_for_focus "$address"
+	hyprctl dispatch fullscreen 1
+}
+
+# Launch a command, wait for the resulting window, maximize it, run hooks, and optionally block until exit.
+# @arg $1 string Name of an associative array (passed by nameref) containing the following keys:
+#   exec_cmd        (string)  Command to launch.
+#   window_class    (string)  Expected window class; if empty, the first new window is used.
+#   on_launch_cmd   (string)  Hook to run after the window opens.
+#   on_focus_cmd    (string)  Hook to run after focus is given to the window.
+#   wait_for_exit   (bool)    When "true", block until the window closes.
+# @return 0 Window launched and ready.
+# @return 0 Window address could not be captured; warning written to stderr (non-fatal).
+launch_window() {
+	local -n options="$1"
+	local address
+
+	local initial_count
+	initial_count=$(hyprctl clients -j | jq '. | length')
+	hyprctl dispatch exec "${options[exec_cmd]}"
+
+	if [ -n "${options[window_class]}" ]; then
+		wait_for_window "${options[window_class]}" || return
+		address=$(hyprctl clients -j | jq -r --arg c "${options[window_class]}" '.[] | select(.class == $c) | .address' | head -1)
+	else
+		wait_for_new_window "$initial_count" || return
+		address=$(hyprctl activewindow -j 2>/dev/null | jq -r '.address // empty')
+		if [ -z "$address" ] || [ "$address" = "0x" ]; then
+			echo "Warning: could not capture window address" >&2
+			return
+		fi
+	fi
+
+	focus_and_maximize "$address"
+	run_hook "${options[on_launch_cmd]}"
+	run_hook "${options[on_focus_cmd]}"
+	[ "${options[wait_for_exit]}" = true ] && wait_for_window_exit "$address"
+}
+
+# Toggle a window by class: show/focus if hidden or unfocused, hide if active, or launch if not found.
+# @arg $1 string Name of an associative array (passed by nameref) containing the following keys:
+#   window_class      (string)  Class of the window to toggle.
+#   exec_cmd          (string)  Command to launch if no matching window exists.
+#   on_hide_cmd       (string)  Hook to run when hiding the window.
+#   on_focus_cmd      (string)  Hook to run when focusing the window.
+#   on_launch_cmd     (string)  Hook to run when launching a new window.
+#   workspace         (string)  Workspace to hide the window to.
+#   wait_for_exit     (bool)    When "true", block until the window closes after launching.
+#   cycle_on_multiple (bool)    When "true" and multiple matches exist, prompt the user to pick one.
+#   picker_cmd        (string)  Picker command used when cycle_on_multiple is true.
+# @return 0 Toggle action completed.
+# @return 1 No window found and exec_cmd is empty; error written to stderr.
+toggle_window() {
+	local -n options="$1"
+
+	local clients_json address
+	clients_json=$(hyprctl clients -j)
+
+	if [ "${options[cycle_on_multiple]}" = true ]; then
+		local match_count
+		match_count=$(echo "$clients_json" | jq -r --arg c "${options[window_class]}" '[.[] | select(.class == $c)] | length')
+		if [ "$match_count" -gt 1 ]; then
+			local selection
+			selection=$(echo "$clients_json" | jq -r --arg c "${options[window_class]}" '.[] | select(.class == $c) | "[\(.workspace.name)] \(.title)\t\(.address)"' | bash -c "${options[picker_cmd]}")
+			[ -z "$selection" ] && return 0
+			address=$(echo "$selection" | awk -F'\t' '{print $NF}')
+		fi
+	fi
+
+	# Exit fullscreen on the current window before toggling
+	local current_fullscreen
+	current_fullscreen=$(hyprctl activewindow -j | jq -r '.fullscreen')
+	if [ "$current_fullscreen" != "0" ] && [ "$current_fullscreen" != "false" ]; then
+		hyprctl dispatch fullscreen 1
+	fi
+
+	address="${address:-$(echo "$clients_json" | jq -r --arg c "${options[window_class]}" '.[] | select(.class == $c) | .address' | head -1)}"
+
+	if [ -n "$address" ]; then
+		local active_address window_workspace current_workspace workspace_id
+		active_address=$(hyprctl activewindow -j | jq -r '.address')
+		window_workspace=$(echo "$clients_json" | jq -r --arg a "$address" '.[] | select(.address == $a) | .workspace.id')
+		current_workspace=$(hyprctl activeworkspace -j | jq -r '.id')
+		workspace_id="${options[workspace]#special:}"
+
+		if [ "$address" = "$active_address" ] && [ "$window_workspace" != "$workspace_id" ] && [[ "$window_workspace" != -* ]]; then
+			# Window is active and visible — hide it
+			hyprctl dispatch movetoworkspacesilent "${options[workspace]}",address:"$address"
+			run_hook "${options[on_hide_cmd]}"
+		else
+			# Window exists but is hidden or unfocused — bring it forward
+			hyprctl dispatch movetoworkspace "$current_workspace",address:"$address"
+			focus_and_maximize "$address"
+			[ "$window_workspace" != "$current_workspace" ] && run_hook "${options[on_focus_cmd]}"
+		fi
+	else
+		if [ -z "${options[exec_cmd]}" ]; then
+			echo "Error: --exec is required to open the initial window when none is found." >&2
+			echo "Use --help for usage information"
+			exit 1
+		fi
+		launch_window cli_opts
+	fi
+}
+
+# Parse CLI arguments and dispatch to toggle_window or launch_window.
+# @arg $@ string All command-line arguments passed to the script.
+# @return 0 Action completed successfully.
+# @return 1 Invalid arguments or missing required options.
+main() {
+	if [ $# -eq 0 ]; then
+		display_logo
+		display_help
+		exit 0
+	fi
+
+	declare -A cli_opts=(
+		[window_class]=""
+		[exec_cmd]=""
+		[on_hide_cmd]=""
+		[on_focus_cmd]=""
+		[on_launch_cmd]=""
+		[workspace]="special:hidden"
+		[wait_for_exit]=false
+		[cycle_on_multiple]=false
+		[picker_cmd]="fuzzel --dmenu"
+	)
+
+	while [[ $# -gt 0 ]]; do
+		case $1 in
+		--class)
+			cli_opts[window_class]="$2"
+			shift 2
+			;;
+		--exec)
+			cli_opts[exec_cmd]="$2"
+			shift 2
+			;;
+		--on-hide)
+			cli_opts[on_hide_cmd]="$2"
+			shift 2
+			;;
+		--on-focus)
+			cli_opts[on_focus_cmd]="$2"
+			shift 2
+			;;
+		--on-launch)
+			cli_opts[on_launch_cmd]="$2"
+			shift 2
+			;;
+		--cycle-on-multiple)
+			cli_opts[cycle_on_multiple]=true
+			shift
+			;;
+		--picker)
+			cli_opts[picker_cmd]="$2"
+			shift 2
+			;;
+		--workspace)
+			cli_opts[workspace]="$2"
+			shift 2
+			;;
+		--wait-for-exit)
+			cli_opts[wait_for_exit]=true
+			shift
+			;;
+		--version)
+			echo "v$version"
+			exit 0
+			;;
+		--help)
+			display_logo
+			display_help
+			exit 0
+			;;
+		*)
+			echo "Unknown option: $1"
+			echo "Use --help for usage information"
+			exit 1
+			;;
+		esac
+	done
+
+	if [ -z "${cli_opts[window_class]}" ] && [ -z "${cli_opts[exec_cmd]}" ]; then
+		echo "Error: --class or --exec (or both) is required."
+		echo "Use --help for usage information"
+		exit 1
+	fi
+
+	if [ -z "${cli_opts[window_class]}" ]; then
+		# No class given — just launch
+		launch_window cli_opts
+	else
+		toggle_window cli_opts
+	fi
+}
+
+main "$@"

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: '.'
+          severity: warning
+          format: gcc
+
+  test:
+    name: Test Script
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xdotool x11-utils bc procps
+
+      - name: Check script syntax
+        run: bash -n hyprtoggle
+
+      - name: Verify script is executable
+        run: test -x hyprtoggle
+
+      - name: Test version output
+        run: ./hyprtoggle --version
+
+      - name: Test help output
+        run: ./hyprtoggle --help
